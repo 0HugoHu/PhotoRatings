@@ -4,12 +4,15 @@ import os
 import shutil
 import json
 import time
+import threading
 from PIL import Image
 from io import BytesIO
 from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
 
 app = Flask(__name__)
+
+job_lock = threading.Lock()
 
 # Folder paths
 BASE_DIR = os.getcwd()
@@ -32,7 +35,6 @@ logging.basicConfig(
 )
 
 
-# Load or create the log file
 if not os.path.exists(LOG_FILE):
     with open(LOG_FILE, 'w') as log_file:
         json.dump({}, log_file)
@@ -44,21 +46,21 @@ def log_operation(message):
 
 
 def compress_image(image_path):
-    """Compress the image to be under a certain size limit (in MB)."""
+    """Compress the image to be der a certain size limit (in MB)."""
     with Image.open(image_path) as img:
         img_bytes = BytesIO()
         img.save(img_bytes, format=img.format, quality=85)
         
         while img_bytes.tell() > MAX_FILE_SIZE_BYTES and img_bytes.getbuffer().nbytes > 10:
             img_bytes = BytesIO()
-            img.save(img_bytes, format=img.format, quality=max(0, img_bytes.getbuffer().nbytes // 1000))  # Reduce quality iteratively
+            img.save(img_bytes, format=img.format, quality=max(0, min(50, img_bytes.getbuffer().nbytes // 4)))
             img_bytes.seek(0)
 
         return img_bytes
 
 
 def get_image_identifier(image_path):
-    """Get the unique identifier for the image based on its last modified time."""
+    """Get the ique identifier for the image based on its last modified time."""
     modified_time = os.path.getmtime(image_path)
     date_str = time.strftime('%Y:%m:%d %H:%M:%S', time.localtime(modified_time))
     return f"{date_str}_{os.path.basename(image_path)}"
@@ -95,97 +97,109 @@ def get_available_folder(base_path):
 
 
 def move_images_to_unrated():
-    start_time = time.time()
-    log_operation("Starting to move images from raw to unrated.")
-    
-    with open(LOG_FILE, 'r') as log_file:
-        log_data = json.load(log_file)
+    with job_lock:
+        start_time = time.time()
+        log_operation("Starting to move images from raw to unrated.")
 
-    for image_file in os.listdir(RAW_FOLDER):
-        if image_file.lower().endswith(('.jpg', '.jpeg', '.png')):
-            source_path = os.path.join(RAW_FOLDER, image_file)
-            image_id = get_image_identifier(source_path)
+        with open(LOG_FILE, 'r') as log_file:
+            log_data = json.load(log_file)
 
-            if image_id in log_data:
-                log_operation(f"Removing duplicate image: {image_file} from {RAW_FOLDER}")
-                os.remove(source_path)
-                continue
+        for root, dirs, files in os.walk(RAW_FOLDER):
+            for image_file in files:
+                if image_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    source_path = os.path.join(root, image_file) 
+                    image_id = get_image_identifier(source_path)
 
-            available_folder = get_available_folder(UNRATED_FOLDER)
-            dest_path = os.path.join(UNRATED_FOLDER, available_folder, image_file)
-            shutil.move(source_path, dest_path)
-            log_operation(f"Moved image: {image_file} from {RAW_FOLDER} to {dest_path}")
+                    if image_id in log_data:
+                        log_operation(f"Removing duplicate image: {image_file} from {root}")
+                        os.remove(source_path)
+                        continue
 
-            log_data[image_id] = {'status': 'unrated', 'path': dest_path}
+                    available_folder = get_available_folder(UNRATED_FOLDER)
+                    dest_path = os.path.join(UNRATED_FOLDER, available_folder, image_file)
+                    shutil.move(source_path, dest_path)
+                    log_operation(f"Moved image: {image_file} from {root} to {dest_path}")
 
-    with open(LOG_FILE, 'w') as log_file:
-        json.dump(log_data, log_file, indent=4)
+                    log_data[image_id] = {'status': 'unrated', 'path': dest_path}
 
-    log_operation(f"Finished moving images. Time taken: {time.time() - start_time:.2f} seconds.")
+        with open(LOG_FILE, 'w') as log_file:
+            json.dump(log_data, log_file, indent=4)
+
+        log_operation(f"Finished moving images. Time taken: {time.time() - start_time:.2f} seconds.")
+
 
 
 @app.route('/get_unrated_images', methods=['GET'])
 async def get_unrated_images():
-    unrated_images = []
-    largest_folder = max([int(f) for f in os.listdir(UNRATED_FOLDER) if os.path.isdir(os.path.join(UNRATED_FOLDER, f))], default=0)
+    with job_lock:
+        unrated_images = []
+        largest_folder = max([int(f) for f in os.listdir(UNRATED_FOLDER) if os.path.isdir(os.path.join(UNRATED_FOLDER, f))], default=0)
 
-    for i in range(1, largest_folder + 1):
-        partition_folder = os.path.join(UNRATED_FOLDER, str(i))
-        if os.path.isdir(partition_folder):
-            unrated_images.extend({
-                "partition": str(i),
-                "filename": filename
-            } for filename in os.listdir(partition_folder) if filename.lower().endswith(('.png', '.jpg', '.jpeg')))
-
-    log_operation(f"Loaded unrated images: {len(unrated_images)} from {UNRATED_FOLDER}")
-    return jsonify(unrated_images)
+        for i in range(largest_folder, 0, -1):
+            partition_folder = os.path.join(UNRATED_FOLDER, str(i))
+            
+            if os.path.isdir(partition_folder):
+                unrated_images.extend({
+                    "partition": str(i),
+                    "filename": filename
+                } for filename in os.listdir(partition_folder) if filename.lower().endswith(('.png', '.jpg', '.jpeg')))
+            
+            if len(unrated_images) >= 10:
+                break
+        
+        unrated_images = unrated_images[:10]
+        log_operation(f"Loaded {len(unrated_images)} rated images from {UNRATED_FOLDER}")
+        return jsonify(unrated_images)
 
 
 @app.route('/images/<partition>/<filename>', methods=['GET'])
 async def serve_image(partition, filename):
-    image_path = os.path.join(UNRATED_FOLDER, partition, filename)
+    with job_lock:
+        image_path = os.path.join(UNRATED_FOLDER, partition, filename)
 
-    if os.path.exists(image_path):
-        if os.path.getsize(image_path) > MAX_FILE_SIZE_BYTES:
-            compressed_image = compress_image(image_path)
-            log_operation(f"Serving compressed image: {filename} from {image_path}")
-            return send_file(compressed_image, mimetype='image/jpeg')
+        if os.path.exists(image_path):
+            if os.path.getsize(image_path) > MAX_FILE_SIZE_BYTES:
+                compressed_image = compress_image(image_path)
+                log_operation(f"Serving compressed image: {filename} from {image_path}")
+                return send_file(compressed_image, mimetype='image/jpeg')
 
-        log_operation(f"Serving original image: {filename} from {image_path}")
-        return send_file(image_path)
+            log_operation(f"Serving original image: {filename} from {image_path}")
+            return send_file(image_path)
 
-    log_operation(f"Image not found: {filename} in partition {partition}")
-    return "Image not found", 404
+        log_operation(f"Image not fod: {filename} in partition {partition}")
+        return "Image not fod", 404
 
 
 @app.route('/rate_image', methods=['POST'])
 def rate_image():
-    data = request.get_json()
-    image_name = data.get('image_name')
-    rating = data.get('rating')
-    partition = data.get('partition')
+    with job_lock:
+        data = request.get_json()
+        image_name = data.get('image_name')
+        rating = data.get('rating')
+        partition = data.get('partition')
 
-    if image_name and rating:
-        source_path = os.path.join(UNRATED_FOLDER, partition, image_name)
-        destination_folder = os.path.join(RATED_FOLDER, str(rating))
+        if image_name and rating:
+            source_path = os.path.join(UNRATED_FOLDER, partition, image_name)
+            destination_folder = os.path.join(RATED_FOLDER, str(rating))
 
-        os.makedirs(destination_folder, exist_ok=True)
-        destination_path = os.path.join(destination_folder, image_name)
-        
-        shutil.move(source_path, destination_path)
-        image_id = get_image_identifier(destination_path)
-        update_log(image_id, 'rated')
+            os.makedirs(destination_folder, exist_ok=True)
+            destination_path = os.path.join(destination_folder, image_name)
+            
+            shutil.move(source_path, destination_path)
+            image_id = get_image_identifier(destination_path)
+            update_log(image_id, 'rated')
 
-        log_operation(f"Moved rated image: {image_name} from {source_path} to {destination_path}")
-        return jsonify({"status": "success", "message": f"Image {image_name} moved to rated {rating} folder"}), 200
+            log_operation(f"Moved rated image: {image_name} from {source_path} to {destination_path}")
+            return jsonify({"status": "success", "message": f"Image {image_name} moved to rated {rating} folder"}), 200
 
-    log_operation("Invalid data received for rating an image.")
-    return jsonify({"status": "error", "message": "Invalid data"}), 400
+        log_operation("Invalid data received for rating an image.")
+        return jsonify({"status": "error", "message": "Invalid data"}), 400
 
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    scheduler.add_job(move_images_to_unrated, 'interval', seconds=SCHEDULER_INTERVAL)
+    job = scheduler.add_job(move_images_to_unrated, 'interval', seconds=SCHEDULER_INTERVAL)
+    job.func()
     scheduler.start()
 
 

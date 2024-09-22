@@ -1,0 +1,4 @@
+flask_app/images_rated/
+flask_app/images_unrated/
+flask_app/images_raw/
+flask_app/logs/

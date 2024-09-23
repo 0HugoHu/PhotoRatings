@@ -19,13 +19,14 @@ BASE_DIR = os.getcwd()
 RAW_FOLDER = os.path.join(BASE_DIR, 'images_raw')
 UNRATED_FOLDER = os.path.join(BASE_DIR, 'images_unrated')
 RATED_FOLDER = os.path.join(BASE_DIR, 'images_rated')
+DEBUG_FOLDER = os.path.join(BASE_DIR, 'images_debug')
 LOG_FILE = os.path.join(BASE_DIR, 'logs', 'images_log.json')
 OPERATION_LOG_FILE = os.path.join(BASE_DIR, 'logs', 'operations.log')
 
 # Constants
 PARTITION_SIZE = 100  # Number of images per partition
 SCHEDULER_INTERVAL = 60 * 60  # Time interval for the scheduler (seconds)
-MAX_FILE_SIZE_BYTES = 6 * 1024 * 1024  # in bytes
+MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024  # in bytes
 
 # Configure logging
 logging.basicConfig(
@@ -46,25 +47,66 @@ def log_operation(message):
 
 
 def compress_image(image_path):
-    """Compress the image by resizing it to be under a certain size limit (in MB)."""
+    """Compress the image by resizing it while preserving the original format, to be under a certain size limit (in MB)."""
+    start_time = time.time()
+    log_operation(f"Compressing image: {image_path}")
+    
     with Image.open(image_path) as img:
+        img_format = img.format
         img_bytes = BytesIO()
         original_size = img.size
-        target_size = (MAX_FILE_SIZE_BYTES * 8) / (original_size[0] * original_size[1])
-        
-        while True:
-            img_bytes = BytesIO()
-            new_size = (int(original_size[0] * target_size), int(original_size[1] * target_size))
-            img_resized = img.resize(new_size, Image.LANCZOS)
-            img_resized.save(img_bytes, format=img.format)
-            img_bytes.seek(0)
+        target_size = MAX_FILE_SIZE_BYTES
 
-            if img_bytes.getbuffer().nbytes <= MAX_FILE_SIZE_BYTES or target_size < 0.25:
-                break 
+        if img_format in ['JPEG', 'JPG']:
+            min_quality = 50  
+            max_quality = 100 
             
-            target_size *= 0.9
+            for scale in [0.8, 0.6, 0.2]:
+                for quality in range(max_quality, min_quality - 1, -10):
+                    new_size = (int(original_size[0] * scale), int(original_size[1] * scale))
+                    img_resized = img.resize(new_size, Image.LANCZOS)
+                    
+                    img_bytes = BytesIO()
+                    img_resized.save(img_bytes, format=img_format, quality=quality)
+                    img_bytes.seek(0)
 
-        return img_bytes
+                    if img_bytes.getbuffer().nbytes <= target_size:
+                        log_operation(f"Compressed image: {image_path} to size: {img_bytes.getbuffer().nbytes / (1024 * 1024):.2f} MB with quality {quality} and scale {scale}. Time taken: {time.time() - start_time:.2f} seconds.")
+                        return img_bytes
+
+        elif img_format == 'PNG':
+            for scale in [0.8, 0.6, 0.2]:
+                new_size = (int(original_size[0] * scale), int(original_size[1] * scale))
+                img_resized = img.resize(new_size, Image.LANCZOS)
+
+                img_bytes = BytesIO()
+                img_resized.save(img_bytes, format=img_format, optimize=True)
+                img_bytes.seek(0)
+
+                if img_bytes.getbuffer().nbytes <= target_size:
+                    log_operation(f"Compressed PNG image: {image_path} to size: {img_bytes.getbuffer().nbytes / (1024 * 1024):.2f} MB with scale {scale}. Time taken: {time.time() - start_time:.2f} seconds.")
+                    return img_bytes
+        
+        else:
+            for scale in [0.8, 0.6, 0.2]:
+                new_size = (int(original_size[0] * scale), int(original_size[1] * scale))
+                img_resized = img.resize(new_size, Image.LANCZOS)
+
+                img_bytes = BytesIO()
+                img_resized.save(img_bytes, format=img_format)
+                img_bytes.seek(0)
+
+                if img_bytes.getbuffer().nbytes <= target_size:
+                    log_operation(f"Compressed image ({img_format}): {image_path} to size: {img_bytes.getbuffer().nbytes / (1024 * 1024):.2f} MB with scale {scale}. Time taken: {time.time() - start_time:.2f} seconds.")
+                    return img_bytes
+
+        os.makedirs(DEBUG_FOLDER, exist_ok=True)
+        destination_path = os.path.join(DEBUG_FOLDER, image_path.split('\\')[-1])
+        shutil.move(image_path, destination_path)
+        log_operation(f"Could not compress image: {image_path} to target size. Moved it to {destination_path}. Time taken: {time.time() - start_time:.2f} seconds.")
+        return img_bytes 
+
+
 
 
 def get_image_identifier(image_path):
@@ -139,6 +181,8 @@ def move_images_to_unrated():
 
 @app.route('/get_unrated_images', methods=['GET'])
 def get_unrated_images():
+    start_time = time.time()
+    log_operation("Starting to load unrated images.")
     unrated_images = []
     largest_folder = max([int(f) for f in os.listdir(UNRATED_FOLDER) if os.path.isdir(os.path.join(UNRATED_FOLDER, f))], default=0)
 
@@ -155,21 +199,24 @@ def get_unrated_images():
             break
     
     unrated_images = unrated_images[:10]
-    log_operation(f"Loaded {len(unrated_images)} rated images from {UNRATED_FOLDER}")
+    log_operation(f"Sent {len(unrated_images)} unrated images list from {UNRATED_FOLDER}")
+    log_operation(f"Time taken to load images: {time.time() - start_time:.2f} seconds.")
     return jsonify(unrated_images)
 
 
 @app.route('/images/<partition>/<filename>', methods=['GET'])
 def serve_image(partition, filename):
+    start_time = time.time()
+    log_operation(f"Starting to serve image {partition}/{filename}.")
     image_path = os.path.join(UNRATED_FOLDER, partition, filename)
 
     if os.path.exists(image_path):
         if os.path.getsize(image_path) > MAX_FILE_SIZE_BYTES:
             compressed_image = compress_image(image_path)
-            log_operation(f"Serving compressed image: {filename} from {image_path}")
+            log_operation(f"Compressed image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
             return send_file(compressed_image, mimetype='image/jpeg')
 
-        log_operation(f"Serving original image: {filename} from {image_path}")
+        log_operation(f"Original image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
         return send_file(image_path)
 
     log_operation(f"Image not fod: {filename} in partition {partition}")
@@ -177,7 +224,9 @@ def serve_image(partition, filename):
 
 
 @app.route('/rate_image', methods=['POST'])
-def rate_image():
+async def rate_image():
+    start_time = time.time()
+    log_operation("Starting to rate an image.")
     data = request.get_json()
     image_name = data.get('image_name')
     rating = data.get('rating')
@@ -200,6 +249,7 @@ def rate_image():
             os.rmdir(os.path.join(UNRATED_FOLDER, partition))
             log_operation(f"Deleted empty partition folder: {partition}")
 
+        log_operation(f"Time taken to rate image: {time.time() - start_time:.2f} seconds")
         return jsonify({"status": "success", "message": f"Image {image_name} moved to rated {rating} folder"}), 200
 
     log_operation("Invalid data received for rating an image.")

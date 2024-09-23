@@ -1,5 +1,6 @@
 import logging
 from flask import Flask, jsonify, request, send_file
+import zipfile
 import os
 import shutil
 import json
@@ -9,6 +10,7 @@ from PIL import Image
 from io import BytesIO
 from apscheduler.schedulers.background import BackgroundScheduler
 from waitress import serve
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -22,11 +24,14 @@ RATED_FOLDER = os.path.join(BASE_DIR, 'images_rated')
 DEBUG_FOLDER = os.path.join(BASE_DIR, 'images_debug')
 LOG_FILE = os.path.join(BASE_DIR, 'logs', 'images_log.json')
 OPERATION_LOG_FILE = os.path.join(BASE_DIR, 'logs', 'operations.log')
+LOG_ARCHIVE_FOLDER = os.path.join(BASE_DIR, 'logs_archive')
 
 # Constants
 PARTITION_SIZE = 100  # Number of images per partition
-SCHEDULER_INTERVAL = 60 * 60  # Time interval for the scheduler (seconds)
+SCHEDULER_INTERVAL_MOVE_TO_UNRATED = 60 * 60  # Time interval for the scheduler (seconds)
+SCHEDULER_INTERVAL_CHECK_LOG_SIZE = 60 * 30 # Time interval for the scheduler (seconds)
 MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024  # in bytes
+MAX_LOG_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20MB
 
 # Configure logging
 logging.basicConfig(
@@ -39,6 +44,9 @@ logging.basicConfig(
 if not os.path.exists(LOG_FILE):
     with open(LOG_FILE, 'w') as log_file:
         json.dump({}, log_file)
+
+if not os.path.exists(LOG_ARCHIVE_FOLDER):
+    os.makedirs(LOG_ARCHIVE_FOLDER, exist_ok=True)
 
 
 def log_operation(message):
@@ -178,6 +186,24 @@ def move_images_to_unrated():
         log_operation(f"Finished moving images. Time taken: {time.time() - start_time:.2f} seconds.")
 
 
+def archive_log_file():
+    """Archives the log file if it exceeds the size limit."""
+    log_size = os.path.getsize(OPERATION_LOG_FILE)
+
+    if log_size > MAX_LOG_FILE_SIZE_BYTES:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        archive_name = os.path.join(LOG_ARCHIVE_FOLDER, f"log_{timestamp}.zip")
+
+        with zipfile.ZipFile(archive_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(OPERATION_LOG_FILE, os.path.basename(OPERATION_LOG_FILE))
+        
+        log_operation(f"Archived log file to {archive_name}")
+
+        with open(OPERATION_LOG_FILE, 'w') as log_operation_file:
+            log_operation_file.write("") 
+
+        log_operation("Created a new log file after archiving.")
+
 
 @app.route('/get_unrated_images', methods=['GET'])
 def get_unrated_images():
@@ -258,8 +284,10 @@ async def rate_image():
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    job = scheduler.add_job(move_images_to_unrated, 'interval', seconds=SCHEDULER_INTERVAL)
-    job.func()
+    job1 = scheduler.add_job(move_images_to_unrated, 'interval', seconds=SCHEDULER_INTERVAL_MOVE_TO_UNRATED)
+    job2 = scheduler.add_job(archive_log_file, 'interval', seconds=SCHEDULER_INTERVAL_CHECK_LOG_SIZE) 
+    job1.func()
+    job2.func()
     scheduler.start()
 
 

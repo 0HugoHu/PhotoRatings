@@ -1,11 +1,54 @@
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, send_file, app, jsonify, request
 from schedulers import *
 from waitress import serve
+from secrets_do_not_upload import *
+import jwt
+from schedulers import *
+from functools import wraps
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = HTTP_SECRET_KEY
+
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            token = request.headers['Authorization'].split(" ")[1]
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 403
+
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            current_user = data['user']
+        except:
+            return jsonify({'message': 'Token is invalid!'}), 403
+
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+@app.route('/photo_ratings_login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if username == HTTP_USER_NAME and password == HTTP_PASSWORD:
+        token = jwt.encode({
+            'user': username,
+            'exp': datetime.now(timezone.utc) + timedelta(hours=12)
+        }, app.config['SECRET_KEY'], algorithm="HS256")
+        return jsonify({'token': token})
+
+    return jsonify({'message': 'Invalid credentials'}), 401
 
 
 @app.route('/get_unrated_images', methods=['GET'])
+@token_required
 def get_unrated_images():
     start_time = time.time()
     log_operation("Starting to load unrated images.")
@@ -31,6 +74,7 @@ def get_unrated_images():
 
 
 @app.route('/images/<partition>/<filename>', methods=['GET'])
+@token_required
 def serve_image(partition, filename):
     start_time = time.time()
     log_operation(f"Starting to serve image {partition}/{filename}.")
@@ -50,7 +94,8 @@ def serve_image(partition, filename):
 
 
 @app.route('/rate_image', methods=['POST'])
-async def rate_image():
+@token_required
+def rate_image():
     start_time = time.time()
     log_operation("Starting to rate an image.")
     data = request.get_json()

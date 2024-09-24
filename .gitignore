@@ -8,3 +8,4 @@ flask_app/__pycache__/
 flask_app/*.pyc
 flask_app/*.pyo
 flask_app/*.pyd
+flask_app/secrets.py

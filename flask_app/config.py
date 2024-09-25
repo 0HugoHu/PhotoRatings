@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+from PIL import Image
 
 # Folder paths
 BASE_DIR = os.getcwd()
@@ -18,6 +19,7 @@ SCHEDULER_INTERVAL_MOVE_TO_UNRATED = 60 * 60  # Time interval (seconds)
 SCHEDULER_INTERVAL_CHECK_LOG_SIZE = 60 * 30 # Time interval (seconds)
 MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024  # MB
 MAX_LOG_FILE_SIZE_BYTES = 20 * 1024 * 1024  # MB
+Image.MAX_IMAGE_PIXELS = 933120000
 
 # Configure logging
 logging.basicConfig(

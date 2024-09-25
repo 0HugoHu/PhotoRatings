@@ -1,5 +1,4 @@
 from config import *
-from PIL import Image
 from io import BytesIO
 import time
 import shutil

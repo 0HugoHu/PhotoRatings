@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 app = Flask(__name__)
 app.config['SECRET_KEY'] = HTTP_SECRET_KEY
 
+served_images = {}
+
 
 def token_required(f):
     @wraps(f)
@@ -52,6 +54,16 @@ def login():
 def get_unrated_images():
     start_time = time.time()
     log_operation("Starting to load unrated images.")
+
+    # Get the current user from the token
+    token = request.headers['Authorization'].split(" ")[1]
+    data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+    current_user = data['user']
+
+    # Get a list of already-served images for this user (if any)
+    already_served = served_images.get(current_user, [])
+
+    # Fetch all unrated images
     unrated_images = []
     largest_folder = max([int(f) for f in os.listdir(UNRATED_FOLDER) if os.path.isdir(os.path.join(UNRATED_FOLDER, f))], default=0)
 
@@ -62,12 +74,16 @@ def get_unrated_images():
             unrated_images.extend({
                 "partition": str(i),
                 "filename": filename
-            } for filename in os.listdir(partition_folder) if filename.lower().endswith(('.png', '.jpg', '.jpeg')))
-        
+            } for filename in os.listdir(partition_folder)
+              if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename not in already_served)
+
         if len(unrated_images) >= 10:
             break
-    
+
+    # Limit to 10 images and update the list of already-served images
     unrated_images = unrated_images[:10]
+    served_images[current_user] = already_served + [image['filename'] for image in unrated_images]
+
     log_operation(f"Sent {len(unrated_images)} unrated images list from {UNRATED_FOLDER}")
     log_operation(f"Time taken to load images: {time.time() - start_time:.2f} seconds.")
     return jsonify(unrated_images)
@@ -116,6 +132,15 @@ def rate_image():
 
         log_operation(f"Moved rated image: {image_name} from {source_path} to {destination_path}")
 
+        # Remove the rated image from the served_images list for the user
+        token = request.headers['Authorization'].split(" ")[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+        current_user = data['user']
+
+        if current_user in served_images:
+            served_images[current_user] = [img for img in served_images[current_user] if img != image_name]
+
+        # Clean up empty folder
         if not os.listdir(os.path.join(UNRATED_FOLDER, partition)):
             os.rmdir(os.path.join(UNRATED_FOLDER, partition))
             log_operation(f"Deleted empty partition folder: {partition}")

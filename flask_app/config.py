@@ -14,6 +14,7 @@ OPERATION_LOG_FILE = os.path.join(BASE_DIR, 'logs', 'operations.log')
 LOG_ARCHIVE_FOLDER = os.path.join(BASE_DIR, 'logs_archive')
 
 # Constants
+IMAGE_BATCH_SIZE = 10  # Number of images to serve per batch
 PARTITION_SIZE = 100  # Number of images per partition
 SCHEDULER_INTERVAL_MOVE_TO_UNRATED = 60 * 60  # Time interval (seconds)
 SCHEDULER_INTERVAL_CHECK_LOG_SIZE = 60 * 30 # Time interval (seconds)
@@ -38,6 +39,6 @@ if not os.path.exists(LOG_FILE):
     with open(LOG_FILE, 'w') as log_file:
         json.dump({}, log_file)
 
-
-if not os.path.exists(LOG_ARCHIVE_FOLDER):
-    os.makedirs(LOG_ARCHIVE_FOLDER, exist_ok=True)
+for folder in [RAW_FOLDER, UNRATED_FOLDER, RATED_FOLDER, DEBUG_FOLDER, LOG_ARCHIVE_FOLDER]:
+    if not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)

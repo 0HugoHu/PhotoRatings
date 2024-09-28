@@ -12,15 +12,21 @@ DEBUG_FOLDER = os.path.join(BASE_DIR, 'images_debug')
 LOG_FILE = os.path.join(BASE_DIR, 'logs', 'images_log.json')
 OPERATION_LOG_FILE = os.path.join(BASE_DIR, 'logs', 'operations.log')
 LOG_ARCHIVE_FOLDER = os.path.join(BASE_DIR, 'logs_archive')
+THUMBNAIL = "_thumb"
 
 # Constants
+# ---------------- Image processing ----------------
 IMAGE_BATCH_SIZE = 10  # Number of images to serve per batch
 PARTITION_SIZE = 100  # Number of images per partition
-SCHEDULER_INTERVAL_MOVE_TO_UNRATED = 60 * 60  # Time interval (seconds)
-SCHEDULER_INTERVAL_CHECK_LOG_SIZE = 60 * 30 # Time interval (seconds)
-MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024  # MB
+# ---------------- Scheduler ----------------
+SCHEDULER_INTERVAL_MOVE_TO_UNRATED = 1 * 60 * 60  # (hour)
+SCHEDULER_INTERVAL_CHECK_LOG_SIZE = 0.5 * 60 * 60 # (hour)
+SCHEDULER_INTERVAL_CREATE_THUMBNAILS = 1 * 60 * 60 # (hour)
 MAX_LOG_FILE_SIZE_BYTES = 20 * 1024 * 1024  # MB
+# ---------------- Image compression ----------------
+MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024  # MB
 Image.MAX_IMAGE_PIXELS = 933120000
+IMAGE_THUMBNAIL_SIZE = 1024
 
 # Configure logging
 logging.basicConfig(

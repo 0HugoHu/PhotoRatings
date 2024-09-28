@@ -12,6 +12,15 @@ def get_image_identifier(image_path):
     return f"{date_str}_{os.path.basename(image_path)}"
 
 
+def get_largets_partition(base_path):
+    partition_folders = [f for f in os.listdir(base_path) 
+                         if os.path.isdir(os.path.join(base_path, f)) 
+                         and not THUMBNAIL in f]
+    
+    partition_folders = sorted(partition_folders, key=int, reverse=True)
+    return int(partition_folders[0]) if partition_folders else 0
+
+
 def get_available_folder(base_path):
     subfolders = [f for f in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, f))]
     subfolders = sorted([int(folder) for folder in subfolders])
@@ -51,7 +60,7 @@ def compress_image(image_path):
         img_format = img.format
         img_bytes = BytesIO()
         original_size = img.size
-        target_size = MAX_FILE_SIZE_BYTES
+        target_size = MAX_IMAGE_SIZE_BYTES
 
         if img_format in ['JPEG', 'JPG']:
             min_quality = 50  

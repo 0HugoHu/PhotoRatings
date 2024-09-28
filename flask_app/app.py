@@ -62,7 +62,7 @@ def get_unrated_images():
     already_served = served_images.get(current_user, [])
 
     unrated_images = []
-    largest_folder = max([int(f) for f in os.listdir(UNRATED_FOLDER) if os.path.isdir(os.path.join(UNRATED_FOLDER, f))], default=0)
+    largest_folder = get_largets_partition(UNRATED_FOLDER)
 
     for i in range(largest_folder, 0, -1):
         partition_folder = os.path.join(UNRATED_FOLDER, str(i))
@@ -91,12 +91,16 @@ def serve_image(partition, filename):
     start_time = time.time()
     log_operation(f"Starting to serve image {partition}/{filename}.")
     image_path = os.path.join(UNRATED_FOLDER, partition, filename)
+    thumbnail_path = os.path.join(UNRATED_FOLDER, partition + THUMBNAIL, filename)
 
     if os.path.exists(image_path):
-        if os.path.getsize(image_path) > MAX_FILE_SIZE_BYTES:
-            compressed_image = compress_image(image_path)
-            log_operation(f"Compressed image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
-            return send_file(compressed_image, mimetype='image/jpeg')
+        if os.path.exists(thumbnail_path):
+            log_operation(f"Thumbnail image: {filename} from {thumbnail_path}, Time taken: {time.time() - start_time:.2f} seconds.")
+            return send_file(thumbnail_path, mimetype='image/jpeg')
+        # if os.path.getsize(image_path) > MAX_IMAGE_SIZE_BYTES:
+        #     compressed_image = compress_image(image_path)
+        #     log_operation(f"Compressed image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
+        #     return send_file(compressed_image, mimetype='image/jpeg')
 
         log_operation(f"Original image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
         return send_file(image_path)

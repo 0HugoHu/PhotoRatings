@@ -18,6 +18,7 @@ THUMBNAIL = "_thumb"
 # ---------------- Image processing ----------------
 IMAGE_BATCH_SIZE = 10  # Number of images to serve per batch
 PARTITION_SIZE = 100  # Number of images per partition
+SERVE_TIMEOUT_SECONDS = 300  # seconds (5 minutes)
 # ---------------- Scheduler ----------------
 SCHEDULER_INTERVAL_MOVE_TO_UNRATED = 1 * 60 * 60  # (hour)
 SCHEDULER_INTERVAL_CHECK_LOG_SIZE = 0.5 * 60 * 60 # (hour)

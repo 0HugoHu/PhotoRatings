@@ -52,14 +52,19 @@ def login():
 @app.route('/get_unrated_images', methods=['GET'])
 @token_required
 def get_unrated_images():
+    cleanup_stale_images(served_images)
+
     start_time = time.time()
     log_operation("Starting to load unrated images.")
-
+    
     token = request.headers['Authorization'].split(" ")[1]
     data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
     current_user = data['user']
 
-    already_served = served_images.get(current_user, [])
+    if current_user not in served_images:
+        served_images[current_user] = {}
+
+    already_served = served_images.get(current_user, {})
 
     unrated_images = []
     largest_folder = get_largets_partition(UNRATED_FOLDER)
@@ -68,17 +73,22 @@ def get_unrated_images():
         partition_folder = os.path.join(UNRATED_FOLDER, str(i))
         
         if os.path.isdir(partition_folder):
-            unrated_images.extend({
-                "partition": str(i),
-                "filename": filename
-            } for filename in os.listdir(partition_folder)
-              if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename not in already_served)
+            for filename in os.listdir(partition_folder):
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename not in already_served:
+                    unrated_images.append({
+                        "partition": str(i),
+                        "filename": filename
+                    })
 
         if len(unrated_images) >= IMAGE_BATCH_SIZE:
             break
 
     unrated_images = unrated_images[:IMAGE_BATCH_SIZE]
-    served_images[current_user] = already_served + [image['filename'] for image in unrated_images]
+    
+    current_time = time.time()
+    served_images[current_user].update({
+        image['filename']: current_time for image in unrated_images
+    })
 
     log_operation(f"Sent {len(unrated_images)} unrated images list from {UNRATED_FOLDER}")
     log_operation(f"Time taken to load images: {time.time() - start_time:.2f} seconds.")
@@ -97,10 +107,6 @@ def serve_image(partition, filename):
         if os.path.exists(thumbnail_path):
             log_operation(f"Thumbnail image: {filename} from {thumbnail_path}, Time taken: {time.time() - start_time:.2f} seconds.")
             return send_file(thumbnail_path, mimetype='image/jpeg')
-        # if os.path.getsize(image_path) > MAX_IMAGE_SIZE_BYTES:
-        #     compressed_image = compress_image(image_path)
-        #     log_operation(f"Compressed image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
-        #     return send_file(compressed_image, mimetype='image/jpeg')
 
         log_operation(f"Original image: {filename} from {image_path}, Time taken: {time.time() - start_time:.2f} seconds.")
         return send_file(image_path)
@@ -137,7 +143,7 @@ def rate_image():
         current_user = data['user']
 
         if current_user in served_images:
-            served_images[current_user] = [img for img in served_images[current_user] if img != image_name]
+            served_images[current_user].pop(image_name, None) 
 
         if not os.listdir(os.path.join(UNRATED_FOLDER, partition)):
             os.rmdir(os.path.join(UNRATED_FOLDER, partition))

@@ -4,8 +4,13 @@ flask_app/images_raw/
 flask_app/logs/
 flask_app/logs_archive/
 flask_app/images_debug/
+flask_app/images_preprocessed/
+flask_app/images_preprocess/
 flask_app/__pycache__/
 flask_app/*.pyc
 flask_app/*.pyo
 flask_app/*.pyd
 flask_app/secrets_do_not_upload.py
+*.zip
+*.tar.gz
+
